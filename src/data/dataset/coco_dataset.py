@@ -156,6 +156,7 @@ class CocoDetectionRGBD(CocoDetection):
         return rgbd, target
 
     def __getitem__(self, idx):
+        print(f"DEBUG: Loading index {idx}")
         # Load the 4-channel numpy array
         img, target = self.load_item(idx)
         
