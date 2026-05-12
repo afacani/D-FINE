@@ -11,7 +11,7 @@ train_dataloader:
   type: DataLoader
   dataset:
     type: CocoDetectionRGBD
-    img_folder: /storage/irem/datasets_scriptie/unified_dataset/train/images
+    img_folder: /storage/irem/datasets_scriptie/unified_dataset/train
     depth_folder: /storage/irem/datasets_scriptie/unified_dataset/train/depths_DAS
     ann_file: /storage/irem/datasets_scriptie/unified_dataset/annotations/train.json
     return_masks: False
@@ -34,7 +34,7 @@ val_dataloader:
   type: DataLoader
   dataset:
     type: CocoDetectionRGBD
-    img_folder: /storage/irem/datasets_scriptie/unified_dataset/valid/images
+    img_folder: /storage/irem/datasets_scriptie/unified_dataset/valid
     depth_folder: /storage/irem/datasets_scriptie/unified_dataset/valid/depths_DAS
     ann_file: /storage/irem/datasets_scriptie/unified_dataset/annotations/valid.json
     return_masks: False

@@ -134,7 +134,11 @@ class CocoDetectionRGBD(CocoDetection):
         rgb_np = np.array(image).astype(np.float32) / 255.0 # Scale RGB to 0-1
         
         file_name = self.coco.loadImgs(self.ids[idx])[0]["file_name"]
-        depth_path = os.path.join(self.depth_folder, file_name.replace('.jpg', '.png'))
+        # Use os.path.basename to get '1.jpg' and discard 'images/'
+        pure_file_name = os.path.basename(file_name)
+        depth_name = pure_file_name.replace('.jpg', '.png')
+
+        depth_path = os.path.join(self.depth_folder, depth_name)
 
         if not os.path.exists(depth_path):
             raise FileNotFoundError(f"Depth map not found: {depth_path}")
