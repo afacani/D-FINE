@@ -170,6 +170,16 @@ class CocoDetectionRGBD(CocoDetection):
         if img.shape[0] != 4:
             print(f"Warning: Expected 4 channels, got {img.shape[0]}")
 
+        # FIX: Convert numpy to Tensor and move Channels to the front
+        if isinstance(img, np.ndarray):
+            # From [H, W, C] to [C, H, W]
+            img = torch.from_numpy(img).permute(2, 0, 1).float()
+        
+        # Double check target values are tensors too
+        for k, v in target.items():
+            if isinstance(v, np.ndarray):
+                target[k] = torch.from_numpy(v)
+
         return img, target
 
 class ConvertCocoPolysToMask(object):
