@@ -356,7 +356,7 @@ class HGNetv2(nn.Module):
 
     arch_configs = {
         "B0": {
-            "stem_channels": [3, 16, 16],
+            "stem_channels": [4, 16, 16],
             "stage_config": {
                 # in_channels, mid_channels, out_channels, num_blocks, downsample, light_block, kernel_size, layer_num
                 "stage1": [16, 16, 64, 1, False, False, 3, 3],
@@ -533,8 +533,40 @@ class HGNetv2(nn.Module):
                 model_path = local_model_dir + "PPHGNetV2_" + name + "_stage1.pth"
                 state = torch.load(model_path, map_location="cpu")
 
-                self.load_state_dict(state)
-                print(f"Loaded stage1 {name} HGNetV2 from URL.")
+                # self.load_state_dict(state)
+                # print(f"Loaded stage1 {name} HGNetV2 from URL.")
+
+                # --- CUSTOM WEIGHT MODIFICATION START ---
+                # 1. Get the current model's state dict (which has the 4-channel conv)
+                model_dict = self.state_dict()
+                
+                # 2. Identify the stem1 weight key
+                # In your architecture: stem -> stem1 -> conv -> weight
+                stem_key = 'stem.stem1.conv.weight'
+                
+                if stem_key in state and state[stem_key].shape[1] == 3:
+                    print(f"Adapting {stem_key} from 3 to 4 channels with Kaiming init for depth.")
+                    
+                    # Get the pretrained 3-channel weights
+                    pretrained_weight = state[stem_key] 
+                    # Get the new 4-channel weight tensor from our model
+                    new_weight = model_dict[stem_key].clone()
+                    
+                    # Copy RGB channels (first 3)
+                    new_weight[:, :3, :, :] = pretrained_weight
+                    
+                    # Initialize 4th channel using Kaiming Normal
+                    # We use a slice [:, 3:4, :, :] to keep the dimensions correct for the init function
+                    nn.init.kaiming_normal_(new_weight[:, 3:4, :, :], mode='fan_in', nonlinearity='relu')
+                    
+                    # Replace the weight in the state dict to be loaded
+                    state[stem_key] = new_weight
+                # --- CUSTOM WEIGHT MODIFICATION END ---
+
+                # Load the modified state dict
+                # strict=False is safer if there are minor mismatches elsewhere
+                self.load_state_dict(state, strict=False) 
+                print(f"Loaded stage1 {name} HGNetV2 with modified 4-channel stem.")
 
             except (Exception, KeyboardInterrupt) as e:
                 if safe_get_rank() == 0:

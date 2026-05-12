@@ -19,6 +19,9 @@ from ._dataset import DetDataset
 torchvision.disable_beta_transforms_warning()
 Image.MAX_IMAGE_PIXELS = None
 
+import numpy as np
+import cv2
+
 __all__ = ["CocoDetection"]
 
 
@@ -119,6 +122,50 @@ def convert_coco_poly_to_mask(segmentations, height, width):
         masks = torch.zeros((0, height, width), dtype=torch.uint8)
     return masks
 
+@register()
+class CocoDetectionRGBD(CocoDetection):
+    def __init__(self, img_folder, ann_file, transforms, depth_folder, **kwargs):
+        # We pass transforms to super so self._transforms is set
+        super().__init__(img_folder, ann_file, transforms=transforms, **kwargs)
+        self.depth_folder = depth_folder
+
+    def load_item(self, idx):
+        image, target = super().load_item(idx) 
+        rgb_np = np.array(image).astype(np.float32) / 255.0 # Scale RGB to 0-1
+        
+        file_name = self.coco.loadImgs(self.ids[idx])[0]["file_name"]
+        depth_path = os.path.join(self.depth_folder, file_name.replace('.jpg', '.png'))
+
+        if not os.path.exists(depth_path):
+            raise FileNotFoundError(f"Depth map not found: {depth_path}")
+        
+        # Load 16-bit depth
+        depth = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED)
+        depth = cv2.resize(depth, (rgb_np.shape[1], rgb_np.shape[0]))
+        
+        # Scale 16-bit (0-65535) to 0.0-1.0
+        depth_np = depth.astype(np.float32) / 65535.0
+        depth_np = np.expand_dims(depth_np, axis=-1)
+        
+        # Now both are 0-1, stack them
+        rgbd = np.concatenate([rgb_np, depth_np], axis=-1)
+        return rgbd, target
+
+    def __getitem__(self, idx):
+        # Load the 4-channel numpy array
+        img, target = self.load_item(idx)
+        
+        # IMPORTANT: Your transforms must support 4-channel numpy arrays.
+        # If using D-FINE's default transforms, they usually expect 
+        # a PIL image or a 3-channel tensor. 
+        if self._transforms is not None:
+            img, target, _ = self._transforms(img, target, self)
+        
+        # Inside __getitem__
+        if img.shape[0] != 4:
+            print(f"Warning: Expected 4 channels, got {img.shape[0]}")
+
+        return img, target
 
 class ConvertCocoPolysToMask(object):
     def __init__(self, return_masks=False):

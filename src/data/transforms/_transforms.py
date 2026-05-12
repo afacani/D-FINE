@@ -24,6 +24,8 @@ from .._misc import (
     convert_to_tv_tensor,
 )
 
+import numpy as np
+
 torchvision.disable_beta_transforms_warning()
 
 
@@ -136,9 +138,33 @@ class ConvertBoxes(T.Transform):
         return inpt
 
 
+# @register()
+# class ConvertPILImage(T.Transform):
+#     _transformed_types = (PIL.Image.Image,)
+
+#     def __init__(self, dtype="float32", scale=True) -> None:
+#         super().__init__()
+#         self.dtype = dtype
+#         self.scale = scale
+
+#     def transform(self, inpt: Any, params: Dict[str, Any]) -> Any:
+#         return self._transform(inpt, params)
+
+#     def _transform(self, inpt: Any, params: Dict[str, Any]) -> Any:
+#         inpt = F.pil_to_tensor(inpt)
+#         if self.dtype == "float32":
+#             inpt = inpt.float()
+
+#         if self.scale:
+#             inpt = inpt / 255.0
+
+#         inpt = Image(inpt)
+
+#         return inpt
+
 @register()
 class ConvertPILImage(T.Transform):
-    _transformed_types = (PIL.Image.Image,)
+    _transformed_types = (PIL.Image.Image, torch.Tensor, np.ndarray)
 
     def __init__(self, dtype="float32", scale=True) -> None:
         super().__init__()
@@ -149,13 +175,51 @@ class ConvertPILImage(T.Transform):
         return self._transform(inpt, params)
 
     def _transform(self, inpt: Any, params: Dict[str, Any]) -> Any:
-        inpt = F.pil_to_tensor(inpt)
+        if isinstance(inpt, PIL.Image.Image):
+            inpt = F.pil_to_tensor(inpt)
+        elif isinstance(inpt, np.ndarray):
+            # Convert HWC (numpy) to CHW (torch)
+            inpt = torch.from_numpy(inpt.transpose(2, 0, 1))
+        
         if self.dtype == "float32":
-            inpt = inpt.float()
+            inpt = inpt.to(torch.float32)
 
-        if self.scale:
+        # Only scale if requested AND the data isn't already normalized
+        if self.scale and inpt.max() > 1.0:
             inpt = inpt / 255.0
 
-        inpt = Image(inpt)
+        # Wrap in D-FINE's Image wrapper for the backbone
+        return Image(inpt)
+    
+@register()
+class RGBDPhotometricDistort(nn.Module):
+    def __init__(self, p=1.0):
+        super().__init__()
+        # Initialize the standard V2 transform
+        self.distort = T.RandomPhotometricDistort(p=p)
 
-        return inpt
+    def forward(self, *inputs):
+        # inputs can be (image, target, ...)
+        # We only want to transform the image part
+        inpt = inputs[0]
+        
+        # Check if it's a 4-channel tensor (C, H, W)
+        if isinstance(inpt, torch.Tensor) and inpt.shape[0] == 4:
+            rgb = inpt[:3, ...]
+            depth = inpt[3:, ...]
+            
+            # Apply distortion to RGB only
+            # We treat it as a temporary 3-channel image for the transform
+            rgb = self.distort(rgb)
+            
+            # Re-stack
+            new_image = torch.cat([rgb, depth], dim=0)
+            
+            # Re-wrap in the custom Image class if necessary
+            if isinstance(inpt, Image):
+                new_image = Image(new_image)
+            
+            return (new_image, *inputs[1:])
+        
+        # Fallback for standard 3-channel
+        return self.distort(*inputs)
