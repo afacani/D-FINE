@@ -11,6 +11,7 @@ import torch
 import torchvision
 import os
 from PIL import Image
+import torch.nn.functional as F
 
 from ...core import register
 from .._misc import convert_to_tv_tensor
@@ -156,31 +157,105 @@ class CocoDetectionRGBD(CocoDetection):
         return rgbd, target
 
     def __getitem__(self, idx):
-        print(f"DEBUG: Loading index {idx}")
-        # Load the 4-channel numpy array
-        img, target = self.load_item(idx)
-        
-        # IMPORTANT: Your transforms must support 4-channel numpy arrays.
-        # If using D-FINE's default transforms, they usually expect 
-        # a PIL image or a 3-channel tensor. 
-        if self._transforms is not None:
-            img, target, _ = self._transforms(img, target, self)
-        
-        # Inside __getitem__
-        if img.shape[0] != 4:
-            print(f"Warning: Expected 4 channels, got {img.shape[0]}")
+            img_np, target = self.load_item(idx) 
+            
+            # 1. Convert to standard Tensor format [4, H, W]
+            img = torch.from_numpy(img_np).permute(2, 0, 1).float()
 
-        # FIX: Convert numpy to Tensor and move Channels to the front
-        if isinstance(img, np.ndarray):
-            # From [H, W, C] to [C, H, W]
-            img = torch.from_numpy(img).permute(2, 0, 1).float()
-        
-        # Double check target values are tensors too
-        for k, v in target.items():
-            if isinstance(v, np.ndarray):
-                target[k] = torch.from_numpy(v)
+            # 2. Extract database image metadata directly to align coordinate scales
+            img_id = self.ids[idx]
+            img_info = self.coco.loadImgs(img_id)[0]
+            
+            json_w = img_info['width']   # 1280
+            json_h = img_info['height']  # 720
 
-        return img, target
+
+            LABEL_MAP = {
+                1: 1,  # Ball -> Maps to 1
+                2: 2,  # Goalpost -> Maps to 2
+                3: 3,  # K1 Robot -> Maps to 3
+                4: 4,  # L-Intersection -> Maps to 4
+                5: 5,  # Penalty Mark -> Maps to 5
+                6: 6,  # T-Intersection -> Maps to 6
+                7: 7   # X-Intersection -> Maps to 7
+            }
+
+            ann_ids = self.coco.getAnnIds(imgIds=img_id)
+            raw_anns = self.coco.loadAnns(ann_ids)
+            
+            boxes = []
+            labels = []
+            
+            for ann in raw_anns:
+                if ann.get('iscrowd', 0):
+                    continue
+                    
+                raw_box = ann['bbox'] # [xmin, ymin, width, height]
+                xmin, ymin, bw, bh = raw_box[0], raw_box[1], raw_box[2], raw_box[3]
+                
+                # 3. Calculate absolute centers
+                cx = xmin + (bw / 2.0)
+                cy = ymin + (bh / 2.0)
+                
+                # 4. Normalize strictly using the JSON file's design space
+                cx_norm = cx / json_w
+                cy_norm = cy / json_h
+                bw_norm = bw / json_w
+                bh_norm = bh / json_h
+
+                boxes.append([cx_norm, cy_norm, bw_norm, bh_norm])
+                
+                # Translate safely using our shifted dictionary map
+                raw_category_id = int(ann['category_id'])
+                if raw_category_id in LABEL_MAP:
+                    labels.append(LABEL_MAP[raw_category_id])
+                else:
+                    continue
+
+            # --- SANITATION FILTER AT THE END OF GETITEM ---
+            if len(boxes) > 0:
+                boxes_tensor = torch.tensor(boxes, dtype=torch.float32)
+                labels_tensor = torch.tensor(labels, dtype=torch.long)
+                
+                # 1. Force strict clipping between 0.0 and 1.0 to eliminate floating point runaways
+                boxes_tensor = torch.clamp(boxes_tensor, 0.0, 1.0)
+                
+                # 2. Filter out any degenerate boxes (Width or Height too close to 0)
+                # box structure is [cx, cy, w, h], so indices 2 and 3 are width and height
+                valid_mask = (boxes_tensor[:, 2] > 1e-4) & (boxes_tensor[:, 3] > 1e-4)
+                
+                # 3. Check for any corrupted NaN or Inf values
+                finite_mask = torch.isfinite(boxes_tensor).all(dim=-1)
+                
+                # Combine filters
+                keep_mask = valid_mask & finite_mask
+                
+                cleaned_boxes = boxes_tensor[keep_mask]
+                cleaned_labels = labels_tensor[keep_mask]
+                
+                # 4. Handle the edge case where all boxes in this specific image were invalid
+                if len(cleaned_boxes) > 0:
+                    target["boxes"] = cleaned_boxes
+                    target["labels"] = cleaned_labels
+                else:
+                    # DETR safety fallback: provide a tiny micro-box instead of an absolute 0-element tensor
+                    target["boxes"] = torch.zeros((0, 4), dtype=torch.float32)
+                    target["labels"] = torch.zeros((0,), dtype=torch.long)
+            else:
+                # Safe placeholder for completely empty background images
+                target["boxes"] = torch.zeros((0, 4), dtype=torch.float32)
+                target["labels"] = torch.zeros((0,), dtype=torch.long)
+
+            img = F.interpolate(
+                img.unsqueeze(0),  # [1, 4, H, W]
+                size=(640, 640),
+                mode='bilinear',
+                align_corners=False
+            ).squeeze(0)  # [4, 640, 640]
+
+            target["orig_size"] = torch.tensor([json_h, json_w], dtype=torch.long)  # [720, 1280]
+
+            return img, target
 
 class ConvertCocoPolysToMask(object):
     def __init__(self, return_masks=False):

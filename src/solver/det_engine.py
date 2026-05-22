@@ -195,7 +195,11 @@ def evaluate(
         #     outputs = model(samples)
 
         # TODO (lyuwenyu), fix dataset converted using `convert_to_coco_api`?
-        orig_target_sizes = torch.stack([t["orig_size"] for t in targets], dim=0)
+        orig_target_sizes = torch.stack([
+            torch.stack([t["orig_size"][1], t["orig_size"][0]])
+            for t in targets
+        ], dim=0)
+
         # orig_target_sizes = torch.tensor([[samples.shape[-1], samples.shape[-2]]], device=samples.device)
 
         results = postprocessor(outputs, orig_target_sizes)
