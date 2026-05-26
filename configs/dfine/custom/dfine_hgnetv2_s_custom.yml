@@ -14,6 +14,7 @@ DFINE:
 
 HGNetv2:
   name: 'B0'
+  input_channels: 4
   return_idx: [1, 2, 3]
   freeze_at: -1
   freeze_norm: False
@@ -49,15 +50,15 @@ optimizer:
 
 
 # Increase to search for the optimal ema
-epochs: 220
+epochs: 300
 train_dataloader:
   total_batch_size: 64
   dataset:
     transforms:
       policy:
-        epoch: 200
+        epoch: 270
   collate_fn:
-    stop_epoch: 200
+    stop_epoch: 270
     ema_restart_decay: 0.9999
     base_size_repeat: 20
 

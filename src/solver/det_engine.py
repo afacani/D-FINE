@@ -54,7 +54,7 @@ def train_one_epoch(
     losses = []
 
     output_dir = kwargs.get("output_dir", None)
-    num_visualization_sample_batch = kwargs.get("num_visualization_sample_batch", 1)
+    num_visualization_sample_batch = kwargs.get("num_visualization_sample_batch", 0)
 
     for i, (samples, targets) in enumerate(
         metric_logger.log_every(data_loader, print_freq, header)
@@ -179,7 +179,7 @@ def evaluate(
     preds: List[Dict[str, torch.Tensor]] = []
 
     output_dir = kwargs.get("output_dir", None)
-    num_visualization_sample_batch = kwargs.get("num_visualization_sample_batch", 1)
+    num_visualization_sample_batch = kwargs.get("num_visualization_sample_batch", 0)
 
     for i, (samples, targets) in enumerate(metric_logger.log_every(data_loader, 10, header)):
         global_step = epoch * len(data_loader) + i

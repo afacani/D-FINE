@@ -185,7 +185,7 @@ class ConvertPILImage(T.Transform):
             inpt = inpt.to(torch.float32)
 
         # Only scale if requested AND the data isn't already normalized
-        if self.scale and inpt.max() > 1.0:
+        if self.scale and inpt.numel() > 0 and inpt.max() > 1.0:
             inpt = inpt / 255.0
 
         # Wrap in D-FINE's Image wrapper for the backbone

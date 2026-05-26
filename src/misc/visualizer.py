@@ -73,7 +73,7 @@ def save_samples(samples: torch.Tensor, targets: List[Dict], output_dir: str, sp
 
         # draw target boxes
         for box, label in zip(target_boxes, target_labels):
-            x1, y1, x2, y2 = box
+            x1, y1, x2, y2 = box[:4]
 
             # Select color based on class ID
             box_color = BOX_COLORS[int(label) % len(BOX_COLORS)]
