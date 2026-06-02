@@ -40,6 +40,10 @@ class DetSolver(BaseSolver):
         best_stat = {
             "epoch": -1,
         }
+        best_map = 0.0
+        patience = 30
+        epochs_without_improvement = 0
+        
         if self.last_epoch > 0:
             module = self.ema.module if self.ema else self.model
             test_stats, coco_evaluator = evaluate(
@@ -118,6 +122,7 @@ class DetSolver(BaseSolver):
             )
 
             # TODO
+
             for k in test_stats:
                 if self.writer and dist_utils.is_main_process():
                     for i, v in enumerate(test_stats[k]):
@@ -165,10 +170,24 @@ class DetSolver(BaseSolver):
                     best_stat = {
                         "epoch": -1,
                     }
+                    best_map = 0.0          # add this
+                    epochs_without_improvement = 0  # add this
+
                     if self.ema:
                         self.ema.decay -= 0.0001
                         self.load_resume_state(str(self.output_dir / "best_stg1.pth"))
                         print(f"Refresh EMA at epoch {epoch} with decay {self.ema.decay}")
+
+            current_map = test_stats["coco_eval_bbox"][0]
+            if current_map > best_map:
+                best_map = current_map
+                epochs_without_improvement = 0
+            else:
+                epochs_without_improvement += 1
+                print(f"No improvement for {epochs_without_improvement}/{patience} epochs. Best mAP50-95: {best_map:.4f}")
+                if epochs_without_improvement >= patience:
+                    print(f"Early stopping triggered at epoch {epoch}. Best mAP50-95: {best_map:.4f}")
+                    break
 
             log_stats = {
                 **{f"train_{k}": v for k, v in train_stats.items()},
